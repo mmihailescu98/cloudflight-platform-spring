@@ -1,12 +1,14 @@
 package io.cloudflight.platform.spring.caching.autoconfigure
 
+import io.cloudflight.platform.spring.caching.migration.RedisSerializationMigration
 import io.cloudflight.platform.spring.caching.serializer.SafeRedisSessionSerializer
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.autoconfigure.AutoConfiguration
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication
-import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+import org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.Import
@@ -17,9 +19,11 @@ import org.springframework.session.Session
 import org.springframework.session.SessionRepository
 import org.springframework.session.data.redis.config.annotation.web.http.EnableRedisHttpSession
 
+// Boot's SessionAutoConfiguration lives in the optional spring-boot-session module as of
+// Spring Boot 4, so it is referenced by name here to keep it off the compile classpath
 @AutoConfiguration(
-    after = [CachingAutoConfiguration::class, RedisAutoConfiguration::class],
-    before = [org.springframework.boot.autoconfigure.session.SessionAutoConfiguration::class]
+    after = [CachingAutoConfiguration::class, DataRedisAutoConfiguration::class],
+    beforeName = ["org.springframework.boot.session.autoconfigure.SessionAutoConfiguration"]
 )
 @ConditionalOnClass(Session::class)
 @ConditionalOnWebApplication
@@ -37,7 +41,9 @@ class SessionAutoConfiguration {
     @ConditionalOnClass(RedisOperations::class)
     @ConditionalOnBean(SessionRepository::class)
     @ConditionalOnMissingBean(RedisSerializer::class)
-    fun springSessionDefaultRedisSerializer(): RedisSerializer<*> {
+    fun springSessionDefaultRedisSerializer(migration: ObjectProvider<RedisSerializationMigration>): RedisSerializer<*> {
+        // ensure stale sessions are flushed before the session repository is used
+        migration.ifAvailable
         return SafeRedisSessionSerializer(RedisSerializer.java())
     }
 }
