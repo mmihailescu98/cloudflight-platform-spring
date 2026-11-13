@@ -79,17 +79,27 @@ Spring Boot 4 uses Jackson 3, and so does the platform (`ObjectMapperFactory`, R
   create yourself, like `ObjectMapperFactory.createObjectMapper()`, which uses the plain Jackson 3 defaults. Check your JSON contracts
   (property order, date formats, durations) with your API tests and clients.
 
-### Redis: cache flush and invalidated sessions
+### Redis: flush cached data and sessions
 
-Cache entries written with Spring Boot 3 (Jackson 2) can't be safely read with Spring Boot 4 (Jackson 3), and Java-serialized sessions are
-not compatible with the Spring Security / Spring Session 7 classes either. The platform therefore **flushes the Redis database once**
-on the first startup with the new version (see [Migrating to Spring Boot 4: automatic Redis flush](#migrating-to-spring-boot-4-automatic-redis-flush)).
-**All users have to log in again** after the upgrade, and caches start cold.
+The serialization of the data in Redis changed: cache entries written with Spring Boot 3 (Jackson 2) can't be safely read with
+Spring Boot 4 (Jackson 3), and Java-serialized sessions are not compatible with the Spring Security / Spring Session 7 classes either.
+The `EvictCacheErrorHandler` and the `SafeRedisSessionSerializer` drop entries that fail to deserialize, but an old entry might also
+deserialize *successfully* into a different shape, which no fallback catches.
 
-If your Redis database is shared with other applications, disable the flush with `cloudflight.cache.redis.flush-on-serialization-change=false`
-and either delete your application's keys manually, or **bump the key prefixes** so old entries are never read again:
-change `spring.cache.redis.key-prefix` (e.g. `myapp-v2::`) and `spring.session.redis.namespace` (e.g. `spring:session:myapp-v2`).
-Old entries then stay in Redis until their time-to-live expires (or forever, if none is set).
+**Take care of this when deploying the upgrade and flush the data in Redis if needed**, e.g.:
+
+* Stop all instances running the Spring Boot 3 version first, so they don't write the old format after the flush
+  (on Kubernetes e.g. scale to `0` or use the `Recreate` strategy for this release), then flush and start the new version.
+* Dedicated Redis database: `redis-cli -h <host> -p <port> -a <password> -n <db> FLUSHDB`
+  (for Azure Cache for Redis with TLS add `--tls -p 6380`, or use the *Flush data* action in the Azure Portal).
+* Shared Redis database: only delete your application's keys, i.e. the cache keys (`spring.cache.redis.key-prefix`, by default
+  `<cacheName>::`) and sessions (`spring:session:` or your `spring.session.redis.namespace`), e.g.
+  `redis-cli ... --scan --pattern 'spring:session:*' | xargs -r -n 500 redis-cli ... UNLINK`.
+* Alternatively, **bump the key prefixes** so old entries are never read again: change `spring.cache.redis.key-prefix`
+  (e.g. `myapp-v2::`) and `spring.session.redis.namespace` (e.g. `spring:session:myapp-v2`). Old entries then stay in Redis
+  until their time-to-live expires (or forever, if none is set).
+
+Either way, **all users have to log in again** after the upgrade, and caches start cold.
 
 ### Web starter and test slices
 
@@ -460,35 +470,8 @@ It also creates a default RedisCacheConfiguration that supports cache properties
 and `isUseKeyPrefix`.
 It will create a default RedisTemplate with a JSON de/serializer if it cannot find a RedisTemplate.
 
-#### Migrating to Spring Boot 4: automatic Redis flush
-
-With Spring Boot 4 the JSON serialization of cache values switched from Jackson 2 to Jackson 3
-(`GenericJacksonJsonRedisSerializer`), including a different type-information format. Sessions are
-Java-serialized, and Spring Security / Spring Session 7 classes are not compatible with the
-Spring Boot 3 versions either.
-
-The `EvictCacheErrorHandler` and the `SafeRedisSessionSerializer` drop entries that fail to deserialize,
-but an entry written by Spring Boot 3 might still deserialize *successfully* into a different shape.
-To be sure no such data is read, the platform **flushes the Redis database once** on the first startup
-with the new version:
-
-* The serialization format version is stored in Redis under the key `cloudflight:platform:redis-serialization-version`.
-* On startup (before the cache manager, the `RedisTemplate` and the session serializer of the platform are created)
-  the [RedisSerializationMigration](platform-spring-bom/platform-spring-caching/src/main/kotlin/io/cloudflight/platform/spring/caching/migration/RedisSerializationMigration.kt)
-  runs `FLUSHDB` if that key doesn't contain the current version, and then sets it. This happens atomically in a
-  Lua script, so with multiple instances starting at the same time only one of them flushes.
-* If Redis is not reachable during startup, an error is logged and the application starts anyway. The flush is
-  then done on the next startup.
-
-Things to be aware of:
-
-* `FLUSHDB` removes **everything** in the Redis database the application is connected to: caches, sessions
-  (all users are logged out once) and ShedLock locks. If your Redis database is shared with other applications,
-  disable the flush with `cloudflight.cache.redis.flush-on-serialization-change=false` and delete the
-  application's keys manually instead.
-* During a rolling update, instances still running the Spring Boot 3 version may write entries in the old format
-  after the flush. Those are handled by the fallbacks mentioned above. If you want to rule that out completely,
-  stop all old instances before starting the new version (on Kubernetes e.g. the `Recreate` strategy for this release).
+> **_NOTE:_** When upgrading from Spring Boot 3, the data in Redis may need to be flushed, see
+> [Redis: flush cached data and sessions](#redis-flush-cached-data-and-sessions).
 
 #### Session Handling
 

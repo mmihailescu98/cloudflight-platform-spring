@@ -1,9 +1,7 @@
 package io.cloudflight.platform.spring.caching.autoconfigure
 
 import com.fasterxml.jackson.annotation.JsonInclude
-import io.cloudflight.platform.spring.caching.migration.RedisSerializationMigration
 import mu.KotlinLogging
-import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.autoconfigure.AutoConfiguration
 import org.springframework.boot.cache.autoconfigure.CacheProperties
 import org.springframework.boot.cache.autoconfigure.RedisCacheManagerBuilderCustomizer
@@ -61,11 +59,7 @@ class CachingAutoConfiguration {
         }
 
         @Bean
-        fun platformRedisCacheManagerBuilderCustomizer(
-            migration: ObjectProvider<RedisSerializationMigration>
-        ): RedisCacheManagerBuilderCustomizer {
-            // ensure stale data is flushed before the cache manager is built
-            migration.ifAvailable
+        fun platformRedisCacheManagerBuilderCustomizer(): RedisCacheManagerBuilderCustomizer {
             return RedisCacheManagerBuilderCustomizer { builder ->
                 builder.transactionAware()
             }
@@ -74,11 +68,7 @@ class CachingAutoConfiguration {
         @Bean
         @ConditionalOnMissingBean(RedisTemplate::class)
         @Lazy
-        fun redisTemplate(
-            connectionFactory: RedisConnectionFactory,
-            migration: ObjectProvider<RedisSerializationMigration>
-        ): RedisTemplate<Any, Any> {
-            migration.ifAvailable
+        fun redisTemplate(connectionFactory: RedisConnectionFactory): RedisTemplate<Any, Any> {
             return RedisTemplate<Any, Any>().apply {
                 setConnectionFactory(connectionFactory)
                 defaultSerializer = JSON

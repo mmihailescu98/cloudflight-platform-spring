@@ -1,8 +1,6 @@
 package io.cloudflight.platform.spring.caching.autoconfigure
 
-import io.cloudflight.platform.spring.caching.migration.RedisSerializationMigration
 import io.cloudflight.platform.spring.caching.serializer.SafeRedisSessionSerializer
-import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.autoconfigure.AutoConfiguration
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass
@@ -41,9 +39,7 @@ class SessionAutoConfiguration {
     @ConditionalOnClass(RedisOperations::class)
     @ConditionalOnBean(SessionRepository::class)
     @ConditionalOnMissingBean(RedisSerializer::class)
-    fun springSessionDefaultRedisSerializer(migration: ObjectProvider<RedisSerializationMigration>): RedisSerializer<*> {
-        // ensure stale sessions are flushed before the session repository is used
-        migration.ifAvailable
+    fun springSessionDefaultRedisSerializer(): RedisSerializer<*> {
         return SafeRedisSessionSerializer(RedisSerializer.java())
     }
 }
